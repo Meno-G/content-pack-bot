@@ -20,13 +20,28 @@ try {
 // AI-მ წყარო გაუგებრად შეაფასა (მაგ. ცუდი ტრანსკრიფცია) — კონტენტს არ ვქმნით
 if (data.source_quality === 'unclear') throw new Error('UNCLEAR_SOURCE');
 
-// მოდელი იშვიათად ურევს უცხო დამწერლობის სიტყვებს (მაგ. 週末) — ვშლით და ვაფრთხილებთ
-const FOREIGN = /[฀-๿぀-ヿ㐀-䶿一-鿿가-힯豈-﫿]+/g;
+// მოდელი ზოგჯერ ურევს სხვა დამწერლობის ასოებს: „кафეში“, „ലეპტოპს“ (მალაიალამური ല ≈ ლ), „გახსნის দিনে“.
+// დასაშვებია მხოლოდ ქართული და ლათინური. პირველ ცდაზე → Retry Needed? თავიდან ჰკითხავს მოდელს.
+// მეორე ცდის შემდეგ: ქართულ სიტყვაში ჩაჯდომილ ასოებს ვასწორებთ (კირილიცა → ქართული, მსგავსი ასოები),
+// ცალკე მდგომ უცხო სიტყვებს ვშლით — და რედაქტორს ვაფრთხილებთ.
+const FOREIGN = /(?:(?![\p{Script=Georgian}\p{Script=Latin}])\p{L}\p{M}*)+/gu;
+const CYRILLIC = { а: 'ა', б: 'ბ', в: 'ვ', г: 'გ', д: 'დ', е: 'ე', ё: 'იო', ж: 'ჟ', з: 'ზ', и: 'ი', й: 'ი', к: 'კ', л: 'ლ', м: 'მ', н: 'ნ', о: 'ო', п: 'პ', р: 'რ', с: 'ს', т: 'ტ', у: 'უ', ф: 'ფ', х: 'ხ', ц: 'ც', ч: 'ჩ', ш: 'შ', щ: 'შჩ', ъ: '', ы: 'ი', ь: '', э: 'ე', ю: 'იუ', я: 'ია' };
+const LOOKALIKE = { 'ല': 'ლ', 'ര': 'რ', 'ന': 'ნ', 'സ': 'ს' };
+const GEO = /\p{Script=Georgian}/u;
+const toGeorgian = (run) => {
+  const out = [...run.toLowerCase()].map(ch => CYRILLIC[ch] ?? LOOKALIKE[ch] ?? null);
+  return out.includes(null) ? null : out.join('');
+};
 let foreignFound = false;
 const str = (v) => {
   if (typeof v !== 'string') return '';
-  const cleaned = v.replace(FOREIGN, () => { foreignFound = true; return ''; });
-  return cleaned.replace(/[ \t]{2,}/g, ' ').trim();
+  const cleaned = v.replace(FOREIGN, (run, offset, all) => {
+    foreignFound = true;
+    const gluedToGeorgian = GEO.test(all[offset - 1] || '') || GEO.test(all[offset + run.length] || '');
+    const fixed = gluedToGeorgian ? toGeorgian(run) : null;
+    return fixed ?? '';
+  });
+  return cleaned.replace(/[ \t]{2,}/g, ' ').replace(/ ([,.;:!?])/g, '$1').trim();
 };
 const arr = (v) => (Array.isArray(v) ? v : []);
 
@@ -39,7 +54,7 @@ if (missing.length) throw new Error('JSON-ში აკლია ველებ
 
 const hashtags = [...new Set(
   arr(data.instagram.hashtags)
-    .map(h => '#' + String(h).replace(/^[\s#]+/, '').replace(/\s+/g, ''))
+    .map(h => '#' + str(String(h)).replace(/^[\s#]+/, '').replace(/\s+/g, ''))
     .filter(h => h.length > 1)
 )].slice(0, 5);
 const reels = arr(data.reels_ideas).filter(r => str(r?.hook) || str(r?.script)).slice(0, 3);
@@ -58,7 +73,7 @@ const linkedin = str(data.linkedin.post);
 const reelsCell = reels
   .map((r, i) => `🎬 იდეა ${i + 1}\nჰუკი: ${str(r.hook)}\nსცენარი:\n${str(r.script)}`)
   .join('\n\n———\n\n');
-if (foreignFound) warnings.push('ტექსტიდან ამოიშალა უცხო დამწერლობის სიმბოლოები — გადაამოწმე წინადადებები');
+if (foreignFound) warnings.push('ორი ცდის შემდეგაც გაერია სხვა დამწერლობის ასოები — ავტომატურად გასწორდა, გადაამოწმე წინადადებები');
 
 const date = DateTime.now().setZone('Asia/Tbilisi').toFormat('yyyy-MM-dd HH:mm');
 const sheetUrl = `https://docs.google.com/spreadsheets/d/${s.sheet_id}/edit`;
@@ -104,5 +119,7 @@ return [{
     message_id: d.message_id,
     telegram_text: telegramText,
     sheet_url: sheetUrl,
+    // Retry Needed? კითხულობს: true → OpenAI-ს ერთხელ თავიდან ვეკითხებით
+    foreign_found: foreignFound,
   },
 }];

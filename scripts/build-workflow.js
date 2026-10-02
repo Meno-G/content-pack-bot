@@ -78,8 +78,9 @@ const nodes = [
     assignments: { assignments: [
       str('sheet_id', 'PASTE_GOOGLE_SHEET_ID'),
       str('sheet_tab', 'Content'),
-      str('openai_model', 'gpt-5'),
-      str('reasoning_effort', 'low'),
+      str('openai_model', 'gpt-4.1'),
+      str('fallback_model', 'gpt-4.1'),
+      str('reasoning_effort', 'medium'),
       str('transcription_model', 'gpt-4o-transcribe'),
       str('transcription_prompt', 'ქართულენოვანი ჩანაწერი მარკეტინგის, ბიზნესისა და სოციალური ქსელების შესახებ. გამართული ქართული მართლწერა და პუნქტუაცია.'),
       str('allowed_chat_ids', ''),
@@ -95,7 +96,7 @@ const nodes = [
 
   N('Send Ack', 'n8n-nodes-base.telegram', 1.2, [900, 60],
     tgSend('={{ $json.chat_id }}',
-      "=⏳ მივიღე: {{ $json.source_type }}\nვამზადებ კონტენტ-პაკეტს კლიენტისთვის „{{ $('Brand Profiles').first().json.client_name }}“ — ჩვეულებრივ 20–90 წამი სჭირდება.",
+      "=⏳ მივიღე: {{ $json.source_type }}\nვამზადებ კონტენტ-პაკეტს კლიენტისთვის „{{ $('Brand Profiles').first().json.client_name }}“ — ჩვეულებრივ 1–2 წუთი სჭირდება.",
       { reply_to_message_id: '={{ $json.message_id }}' }),
     { onError: 'continueRegularOutput' }),
 
@@ -183,7 +184,12 @@ const nodes = [
   N('Parse AI Response', 'n8n-nodes-base.code', 2, [2480, 280],
     { jsCode: code('parse_ai_response.js') }, { onError: 'continueErrorOutput' }),
 
-  N('Save to Google Sheets', 'n8n-nodes-base.googleSheets', 4.5, [2700, 260], {
+  // Mixed-in foreign script on the first attempt → ask the model once more
+  N('Retry Needed?', 'n8n-nodes-base.if', 2.2, [2700, 260],
+    ifBool('={{ $json.foreign_found === true && $runIndex === 0 }}')),
+  N('Retry Request', 'n8n-nodes-base.code', 2, [2480, 60], { jsCode: code('retry_request.js') }),
+
+  N('Save to Google Sheets', 'n8n-nodes-base.googleSheets', 4.5, [2920, 260], {
     operation: 'append',
     documentId: { __rl: true, value: "={{ $('Settings').first().json.sheet_id }}", mode: 'id' },
     sheetName: { __rl: true, value: "={{ $('Settings').first().json.sheet_tab }}", mode: 'name' },
@@ -199,7 +205,7 @@ const nodes = [
     options: { cellFormat: 'RAW' },
   }, { retryOnFail: true, maxTries: 2, waitBetweenTries: 3000, onError: 'continueErrorOutput' }),
 
-  N('Send Summary', 'n8n-nodes-base.telegram', 1.2, [2940, 240],
+  N('Send Summary', 'n8n-nodes-base.telegram', 1.2, [3140, 240],
     tgSend("={{ $('Parse AI Response').first(0).json.chat_id }}",
       "={{ $('Parse AI Response').first(0).json.telegram_text }}",
       { disable_web_page_preview: true, reply_to_message_id: "={{ $('Parse AI Response').first(0).json.message_id }}" })),
@@ -259,7 +265,9 @@ const connections = {
   'Source OK?': main(['Build AI Request'], [ERR]),
   'Build AI Request': main(['OpenAI Generate']),
   'OpenAI Generate': main(['Parse AI Response'], [ERR]),
-  'Parse AI Response': main(['Save to Google Sheets'], [ERR]),
+  'Parse AI Response': main(['Retry Needed?'], [ERR]),
+  'Retry Needed?': main(['Retry Request'], ['Save to Google Sheets']),
+  'Retry Request': main(['OpenAI Generate']),
   'Save to Google Sheets': main(['Send Summary'], [ERR]),
   [ERR]: main(['Send Error Message']),
   'Error Trigger': main(['Format Admin Alert']),

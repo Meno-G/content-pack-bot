@@ -2,7 +2,7 @@
 
 **One source in, a full Georgian social-media content pack out.** A marketing team sends a video, a voice note, an article link or a short brief to a Telegram bot. About a minute later the team has drafts for Instagram, Facebook and LinkedIn, three Reels/TikTok scripts and five headlines. Each pack is written in the client's brand voice and logged to Google Sheets for approval.
 
-Built with **n8n** · **OpenAI** (gpt-4o-transcribe, gpt-5) · **Telegram Bot API** · **Google Sheets**
+Built with **n8n** · **OpenAI** (gpt-4o-transcribe, gpt-4.1) · **Telegram Bot API** · **Google Sheets**
 
 > 🇬🇪 Full setup guide in Georgian: [docs/setup-ka.md](docs/setup-ka.md)
 
@@ -55,13 +55,15 @@ flowchart TD
     STT --> SQ{Source OK?}
     EX --> SQ
     TX --> SQ
-    SQ -- yes --> B[Build prompt + JSON schema] --> LLM[gpt-5 · strict JSON] --> P[Parse & validate] --> GS[(Google Sheets)] --> SUM[Telegram summary]
+    SQ -- yes --> B[Build prompt + JSON schema] --> LLM[gpt-4.1 · strict JSON] --> P[Parse & validate] --> RN{Mixed scripts?}
+    RN -- "yes, 1st try" --> LLM
+    RN -- no --> GS[(Google Sheets)] --> SUM[Telegram summary]
     SQ -- no --> ERR[Friendly Georgian error message]
     GF & STT & FU & LLM & P & GS -. error output .-> ERR
     ET[Error Trigger] --> ADM[Admin alert]
 ```
 
-**28 nodes.** Every external call has retries and a dedicated error output. A separate Error Trigger catches anything unexpected and alerts the admin.
+**30 nodes.** Every external call has retries and a dedicated error output. A separate Error Trigger catches anything unexpected and alerts the admin.
 
 ## Results from real end-to-end tests
 
@@ -72,13 +74,16 @@ flowchart TD
 | Georgian voice note | ✅ Near-verbatim transcript after switching from `whisper-1` (gibberish) to `gpt-4o-transcribe` |
 | Phone video + `#law` profile | ✅ Formal tone, no emoji, legal disclaimer, brand CTA |
 | Sticker / YouTube link / unreachable sheet | ✅ Clear Georgian error replies; content still delivered when Sheets fails |
-| Cost per pack (gpt-5, low reasoning) | ~$0.03 *(estimate from token usage)* |
+| Model choice, measured over 17 generations | gpt-4.1: **0 of 9** runs with foreign-script glitches, avg 14 s · gpt-5: **6 of 8** runs (Russian, Bengali, Tamil, Malayalam, Korean, Japanese letters inside Georgian text), avg 57 s |
+| Time & cost per pack (gpt-4.1) | ~15–25 s · ~$0.02 *(estimate from token usage)* |
 
 The interesting part is what broke along the way and how it was fixed. See **[docs/lessons-learned.md](docs/lessons-learned.md)**: unsupported language codes, non-deterministic transcription, hallucination guards, a measured model comparison and several n8n gotchas.
 
 ## Key design decisions
 
-- **Strict structured output.** The LLM must answer against a JSON schema (`strict: true`) that includes a `source_quality` flag. A validating parser then enforces counts, normalises hashtags, strips foreign-script glitches and refuses to build content from unintelligible sources.
+- **Strict structured output.** The LLM must answer against a JSON schema (`strict: true`) that includes a `source_quality` flag. A validating parser then enforces counts, normalises hashtags, repairs or removes foreign-script glitches and refuses to build content from unintelligible sources.
+- **Self-healing generation.** If the model mixes another script into Georgian (e.g. `кафეში`), the workflow automatically regenerates once, optionally with a `fallback_model`. If the second answer still contains foreign letters, Cyrillic is transliterated to Georgian, look-alike letters are replaced, and the editor gets a warning.
+- **Natural Georgian by rule, not by luck.** The system prompt lists real "translated-sounding" phrases from test runs as forbidden patterns, prefers verbs over noun chains, and asks the model to proofread like a Georgian editor. Brand profiles also accept example posts.
 - **Brand voice as data.** Each client is a profile (`brand_voice`, audience, `შენ/თქვენ` address form, CTA, rules, `vocabulary`). The vocabulary feeds both the transcription model and the LLM. Adding a client is a 5-minute change.
 - **Fact preservation over creativity.** The prompt forbids inventing or "refining" facts and numbers, and tells the model to drop fragments it cannot reliably understand.
 - **Human in the loop.** The bot produces strong first drafts; an editor approves them in Sheets. This is deliberate, based on test findings.
@@ -90,7 +95,7 @@ The interesting part is what broke along the way and how it was fixed. See **[do
 ├── workflow/content-pack-workflow.json   # import this into n8n
 ├── src/nodes/*.js                        # JavaScript of every Code node
 ├── scripts/build-workflow.js             # assembles the workflow JSON from src/
-├── tests/code-nodes.test.js              # 15 unit tests (Node's built-in test runner)
+├── tests/code-nodes.test.js              # 19 unit tests (Node's built-in test runner)
 ├── docs/setup-ka.md                      # full setup & testing guide (Georgian)
 ├── docs/lessons-learned.md               # problems found in testing and their fixes
 └── start-bot.cmd                         # Windows launcher: ngrok tunnel + n8n

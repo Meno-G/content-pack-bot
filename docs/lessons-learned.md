@@ -45,23 +45,50 @@ Notes from building and testing the bot end-to-end with real Telegram messages, 
 - **Fix:** a rule to **skip** unrecoverable fragments entirely instead of referring to them.
 - **Result:** the next run said "two changes", matching what was actually audible.
 
-### 2.4 Foreign-script tokens
-- **Symptom:** `gpt-5` once wrote the Japanese word `週末` (*weekend*) in the middle of a Georgian LinkedIn post.
-- **Fix:** post-validation in `Parse AI Response` strips CJK/Hangul/Thai characters and adds a ⚠️ warning to the Telegram summary so the editor re-reads that sentence.
+### 2.4 Foreign-script tokens inside Georgian text
+- **Symptoms:** `gpt-5` repeatedly put letters from other scripts into Georgian words. Examples: `週末` (Japanese "weekend"), `দিনে` (Bengali "day"), `и действ…` (Russian), `кафეში` (Russian letters inside "კაფეში"), and `ലეპტოპს` (Malayalam ല, which looks like Georgian ლ).
+- **First fix (insufficient):** strip CJK characters. It missed most cases, and stripping letters *inside* a word broke the word (`ლეპტოპს` → `ეპტოპს`).
+- **Final fix, three layers:**
+  1. A prompt rule: Georgian script only; Latin only for brand/platform names and hashtags.
+  2. Detection of *any* letter that is neither Georgian nor Latin (`p{Script}` regex). On the first hit the workflow **regenerates once** (`Retry Needed?` → `Retry Request`), optionally with a `fallback_model`.
+  3. If the second answer is still dirty, Cyrillic runs glued to Georgian letters are transliterated (`кафეში` → `კაფეში`), known look-alikes are replaced (`ല` → `ლ`), stand-alone foreign words are removed, and the editor is warned.
+- **Root-cause fix:** switching the default model (see section 3) eliminated the problem in practice.
+
+### 2.5 Vocabulary leaked into the content as facts
+- **Symptom:** the post for a café opening mentioned croissants, cappuccino and filter coffee. None of them were in the source.
+- **Root cause:** the per-client `vocabulary` list (meant for spelling and transcription) was read by the model as "things this café sells".
+- **Fix:** an explicit rule that terminology is for spelling only and must not introduce products or services. A matching rule for Reels: shot descriptions may be creative, but on-screen text and voice-over may only state source facts (one run had invented "free Wi-Fi").
+
+### 2.6 "Translated-sounding" Georgian
+- **Symptom:** grammatically valid but unnatural copy, such as "ამ სურნელში არის პატარა დღესასწაული" (*in this aroma there is a small celebration*) and corporate filler on LinkedIn.
+- **Root causes:** an over-poetic example brand profile I had written, and no concrete style guidance.
+- **Fix:** style rules with real bad examples from earlier runs (forbidden patterns), verbs over noun chains, at most one figurative phrase per post, and an explicit "proofread like a Georgian editor" step. Brand profiles gained an `examples` field for real approved posts, the strongest lever for tone.
+- **Result:** the same café brief produced plain, natural copy ("ახალ ფილიალში დაგხვდება ლეპტოპით სამუშაო ზონა და ღია ტერასა — მოდი, იმუშავე ან უბრალოდ განიტვირთე ჩვენთან.").
 
 ---
 
-## 3. Model choice: measured, not assumed
+## 3. Model choice: measured, then reversed
 
-Same 37-second video, same brand profile:
+**Round 1, one video, one brand profile.** I measured speed and repair quality:
 
-| Model | LLM time | Tokens in / out | Est. cost | Quality notes |
+| Model | LLM time | Tokens in / out | Est. cost | Observation |
 |---|---|---|---|---|
 | gpt-4.1 | ~11 s | 2,875 / 1,221 | ~$0.02 | Took a mis-transcribed term literally |
-| gpt-5 (default effort) | 66 s | 2,876 / 7,255 (5,312 reasoning) | ~$0.08 | Best repair of transcription errors |
-| **gpt-5, `reasoning_effort: low`** | **32 s** | 2,986 / 2,574 | **~$0.03** | Most of the quality at less than half the time. **Chosen default** |
+| gpt-5 (default effort) | 66 s | 2,876 / 7,255 (5,312 reasoning) | ~$0.08 | Repaired transcription errors best |
+| gpt-5, `reasoning_effort: low` | 32 s | 2,986 / 2,574 | ~$0.03 | Most of the quality at half the time |
 
-**A mistake I caught in my own evaluation:** the first gpt-5 run looked far better than gpt-4.1. But I had just added a prompt rule whose example happened to contain the exact misheard word from that test video. The comparison was not fair, so I removed the test-specific example, generalised the rule and re-ran both models before deciding.
+On that basis I made **gpt-5 (low)** the default. I also caught a flaw in my own comparison: a prompt example I had just added contained the exact misheard word from that test video. I generalised the rule and re-ran before deciding.
+
+**Round 2, real usage.** Over the next demo runs gpt-5 began mixing other scripts into Georgian (section 2.4), at low and at medium effort. I then audited **every generation in the execution history** with the same script detector:
+
+| Model | Generations | With foreign-script letters | Avg. LLM time |
+|---|---|---|---|
+| gpt-4.1 | 9 | **0** | 14 s |
+| gpt-5 (low / medium / default) | 8 | **6** (Russian, Bengali, Tamil, Malayalam, Korean, Japanese) | 57 s |
+
+The audit also showed that one gpt-5 run I had judged "clean" by reading it contained a Korean word I had missed. Eyeballing output is not a measurement.
+
+**Decision:** gpt-4.1 is the default. Its main weakness, taking transcription errors literally, is now handled upstream by the per-client vocabulary (1.4). gpt-5 stays available as `fallback_model` or primary via one setting. **Lesson:** a model that is "smarter" on benchmarks can be worse for a specific language. Measure on your own data, over many runs, with an automated check.
 
 ---
 
@@ -90,7 +117,7 @@ Same 37-second video, same brand profile:
 
 ## 6. What I would do next
 
-1. **Few-shot brand examples:** 2–3 approved posts per client in the profile, likely the biggest remaining lever for Georgian style quality.
+1. **Fill the `examples` field** with 2–3 approved posts per client. The field and prompt wiring exist; real examples are likely the biggest remaining lever for Georgian style.
 2. **Per-client sheets and chat-ID routing:** prerequisite for letting clients use the bot directly; today all clients share one sheet.
 3. **Edit-rate tracking:** log how much editors change each draft, to steer prompt work with data.
 4. **Hosting:** move from a laptop plus ngrok to n8n Cloud or a small VPS for 24/7 availability.

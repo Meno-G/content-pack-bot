@@ -141,10 +141,60 @@ test('warns in Telegram when the model returns too few items', async () => {
   assert.match(out.telegram_text, /Reels იდეა 1\/3/);
 });
 
-test('strips foreign-script tokens (e.g. 週末) and warns the editor', async () => {
-  const out = (await parse(validPack({ linkedin: { post: 'კონტექსტი:週末 შეხვედრები' } }))).json;
+test('detects any non-Georgian/non-Latin script (real cases: 週末, দিনে, действ) and flags a retry', async () => {
+  const out = (await parse(validPack({
+    summary: 'გახსნის দিনে პირველი 50 სტუმარი',
+    facebook: { post: 'ყველა დესერტზე и действует 20%-იანი ფასდაკლება' },
+    linkedin: { post: 'კონტექსტი:週末 შეხვედრები' },
+  }))).json;
+  assert.equal(out.foreign_found, true);
+  assert.equal(out.summary, 'გახსნის პირველი 50 სტუმარი');
+  assert.equal(out.facebook, 'ყველა დესერტზე 20%-იანი ფასდაკლება');
   assert.equal(out.linkedin, 'კონტექსტი: შეხვედრები');
-  assert.match(out.telegram_text, /უცხო დამწერლობის/);
+  assert.match(out.telegram_text, /სხვა დამწერლობის ასოები/);
+});
+
+test('repairs foreign letters glued inside Georgian words instead of breaking the word', async () => {
+  // real outputs from gpt-5: Russian "каф" inside "კაფეში", Malayalam "ല" (looks like ლ) inside "ლეპტოპს"
+  const out = (await parse(validPack({
+    instagram: { caption: 'თუ მუშაობას кафეში ანიჭებ უპირატესობას, ലეპტოპს ნუ დატოვებ სახლში.', hashtags: ['#a', '#b', '#c', '#d', '#e'] },
+  }))).json;
+  assert.ok(out.instagram.startsWith('თუ მუშაობას კაფეში ანიჭებ უპირატესობას, ლეპტოპს ნუ დატოვებ სახლში.'));
+  assert.equal(out.foreign_found, true);
+});
+
+test('keeps Georgian, Latin brand names, emoji and punctuation untouched', async () => {
+  const text = 'Instagram-ზე ვხსნით Reels სერიას ☕🍰 — „ახალი“ მენიუ, 20%!';
+  const out = (await parse(validPack({ facebook: { post: text } }))).json;
+  assert.equal(out.facebook, text);
+  assert.equal(out.foreign_found, false);
+});
+
+test('retry re-sends the same request, switching to fallback_model when it differs', async () => {
+  const body = { model: 'gpt-5', reasoning_effort: 'medium', messages: [] };
+  const same = await runNode('retry_request.js', {
+    nodes: { Settings: { ...SETTINGS, fallback_model: 'gpt-5' }, 'Build AI Request': { body, source_text: 'x' } },
+  });
+  assert.deepEqual(same.json.body, body);
+
+  const switched = (await runNode('retry_request.js', {
+    nodes: { Settings: { ...SETTINGS, fallback_model: 'gpt-4.1' }, 'Build AI Request': { body, source_text: 'x' } },
+  })).json.body;
+  assert.equal(switched.model, 'gpt-4.1');
+  assert.equal(switched.temperature, 0.8);
+  assert.ok(!('reasoning_effort' in switched));
+  assert.equal(body.model, 'gpt-5', 'original request must not be mutated');
+});
+
+test('vocabulary is marked as spelling-only and brand examples reach the prompt', async () => {
+  const { body } = (await runNode('build_ai_request.js', {
+    nodes: { Settings: SETTINGS, 'Brand Profiles': { client_name: 'C', vocabulary: 'კრუასანი', examples: 'მაგალითი პოსტი' } },
+    input: { source_text: 'x' },
+  })).json;
+  const prompt = body.messages[0].content;
+  assert.match(prompt, /წყაროში არ არის, ტერმინოლოგიიდან არ ახსენო/);
+  assert.match(prompt, /სტილის მაგალითები[\s\S]*მაგალითი პოსტი/);
+  assert.match(prompt, /მხოლოდ ქართული ანბანი/);
 });
 
 test('refuses to build content from an unclear source', async () => {
