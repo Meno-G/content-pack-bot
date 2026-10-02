@@ -34,7 +34,7 @@ Every pack is appended to Google Sheets with status **დასამტკი�
 ## Architecture
 
 ```mermaid
-flowchart LR
+flowchart TD
     TG[Telegram Trigger] --> S[Settings] --> BP[Brand Profiles] --> DI[Detect Input] --> OK{Input OK?}
     OK -- no --> ERR
     OK -- yes --> R{Route by type}
