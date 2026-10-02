@@ -13,9 +13,20 @@ Built with **n8n** · **OpenAI** (gpt-4o-transcribe, gpt-5) · **Telegram Bot AP
 <!-- Replace with your recording, e.g. a Loom link or screenshots/demo.gif -->
 📹 **Demo video:** _coming soon_
 
-| Telegram | Google Sheets | n8n |
-|---|---|---|
-| _screenshots/telegram.png_ | _screenshots/sheets.png_ | _screenshots/n8n-canvas.png_ |
+**The workflow in n8n:** a successful run, every step green.
+
+![n8n workflow](screenshots/n8n-canvas.png)
+
+<table>
+<tr>
+<th width="38%">Telegram: request → content pack summary</th>
+<th>Google Sheets: one row per pack, awaiting approval</th>
+</tr>
+<tr>
+<td valign="top"><img src="screenshots/telegram.png" alt="Telegram bot conversation"></td>
+<td valign="top"><img src="screenshots/sheets.png" alt="Google Sheets content log"></td>
+</tr>
+</table>
 
 ---
 
