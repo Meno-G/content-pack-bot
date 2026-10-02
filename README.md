@@ -10,8 +10,9 @@ Built with **n8n** · **OpenAI** (gpt-4o-transcribe, gpt-4.1) · **Telegram Bot 
 
 ## Demo
 
-<!-- Replace with your recording, e.g. a Loom link or screenshots/demo.gif -->
-📹 **Demo video:** _coming soon_
+📹 **[Watch the demo on YouTube](https://youtube.com/shorts/YFuqr0h26L0)**: a brief sent in Telegram becomes a full content pack in the chat and in Google Sheets.
+
+<a href="https://youtube.com/shorts/YFuqr0h26L0"><img src="https://img.youtube.com/vi/YFuqr0h26L0/hqdefault.jpg" alt="Demo video: Content Pack Bot in Telegram" width="360"></a>
 
 **The workflow in n8n:** a successful run, every step green.
 
