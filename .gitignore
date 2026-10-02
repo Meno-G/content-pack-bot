@@ -1,0 +1,9 @@
+# Local n8n exports contain real IDs (Google Sheet ID, chat IDs) - never commit them
+*-export*.json
+live-*.json
+.env
+.claude/
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
